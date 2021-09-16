@@ -1,5 +1,5 @@
 {
-  "name": "code-oss-dev",
+  "name": "che-code",
   "version": "1.61.0",
   "distro": "c457edb0d1f21bc2c17474861d54e5a8a3d52057",
   "author": {
@@ -118,6 +118,7 @@
     "@types/windows-mutex": "^0.4.0",
     "@types/windows-process-tree": "^0.2.0",
     "@types/winreg": "^1.2.30",
+    "@types/ws": "^7.4.7",
     "@types/yauzl": "^2.9.1",
     "@types/yazl": "^2.4.2",
     "@typescript-eslint/eslint-plugin": "3.2.0",
@@ -229,5 +230,6 @@
   "resolutions": {
     "elliptic": "^6.5.3",
     "nwmatcher": "^1.4.4"
-  }
+  },
+  "bin": "out/vs/che/node/entrypoint-loader.js"
 }

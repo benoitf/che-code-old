@@ -59,6 +59,11 @@ function hygiene(some, linting = true) {
 	});
 
 	const copyrights = es.through(function (file) {
+		// skip che relative copyright files
+		if (/^.*\/vs\/che.*/.test(file.relative) || /^build\/gulpfile.che.js/.test(file.relative)) {
+			this.emit('data', file);
+			return;
+		}
 		const lines = file.__lines;
 
 		for (let i = 0; i < copyrightHeaderLines.length; i++) {

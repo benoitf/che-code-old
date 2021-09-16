@@ -513,8 +513,24 @@ class WindowIndicator implements IWindowIndicator {
 		enabled: config.settingsSyncOptions.enabled,
 	} : undefined;
 
+
+	console.log('Creating workbench with config ', JSON.stringify({
+		welcomeBanner,
+		...config,
+		logLevel: logLevel ? parseLogLevel(logLevel) : undefined,
+		settingsSyncOptions,
+		homeIndicator,
+		windowIndicator,
+		productQualityChangeHandler,
+		workspaceProvider,
+		urlCallbackProvider: new PollingURLCallbackProvider(),
+		credentialsProvider: new LocalStorageCredentialsProvider()
+	}, undefined, 2));
+
 	// Finally create workbench
 	create(document.body, {
+		// allow to override the default banner by adding config after
+		welcomeBanner,
 		...config,
 		developmentOptions: {
 			logLevel: logLevel ? parseLogLevel(logLevel) : undefined,
@@ -523,7 +539,6 @@ class WindowIndicator implements IWindowIndicator {
 		settingsSyncOptions,
 		homeIndicator,
 		windowIndicator,
-		welcomeBanner,
 		productQualityChangeHandler,
 		workspaceProvider,
 		urlCallbackProvider: new PollingURLCallbackProvider(),
