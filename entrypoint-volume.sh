@@ -16,6 +16,7 @@ ls -la /checode-mount/
 
 # Start the machine-exec component in background
 nohup /checode-mount/bin/machine-exec --url '0.0.0.0:3333' &
+sleep 5
 
 # Start the checode component
 /checode-mount/bin/node-alpine /checode-mount/out/vs/che/node/entrypoint-loader.js
