@@ -17,6 +17,7 @@ RUN apk add --update --no-cache \
 
 COPY code /vscode-compilation
 WORKDIR /vscode-compilation
+ENV ELECTRON_SKIP_BINARY_DOWNLOAD=1
 RUN git init .
 RUN yarn
 RUN npm rebuild
