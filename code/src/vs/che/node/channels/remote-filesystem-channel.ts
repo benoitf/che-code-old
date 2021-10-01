@@ -86,10 +86,10 @@ export class RemoteFileSystemChannel implements IServerChannel<RemoteAgentConnec
 				// {
 				// 	'$mid': 1,
 				// 	fsPath: 'eclipse/che-dashboard',
-				// 	external: 'vscode-remote://localhost:8080/eclipse/che-dashboard',
+				// 	external: 'vscode-remote://localhost:3100/eclipse/che-dashboard',
 				// 	path: '/eclipse/che-dashboard',
 				// 	scheme: 'vscode-remote',
-				// 	authority: 'localhost:8080'
+				// 	authority: 'localhost:3100'
 				// },
 				// {
 				// 	recursive: true,

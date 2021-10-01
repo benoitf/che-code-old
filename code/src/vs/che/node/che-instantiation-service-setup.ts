@@ -207,7 +207,7 @@ export class CheInstantiationServiceSetup {
 		// Che specific stuff to serve http requests
 		services.set(HttpRequestHandler, new SyncDescriptor(CheHttpRequestHandler));
 		services.set(WebsocketHandler, new SyncDescriptor(CheWebsocketHandler, [this.onDidClientConnectEmitter, uriTransformerPath]));
-		services.set(HttpServer, new SyncDescriptor(CheHttpServer, [8080]));
+		services.set(HttpServer, new SyncDescriptor(CheHttpServer, [3100]));
 
 		// instantiate services
 		const instantiationService = new InstantiationService(services);

@@ -46,7 +46,7 @@ export class RemoteExtensionEnvironmentChannel implements IServerChannel<RemoteA
 		switch (command) {
 			// receive for example getEnvironmentData and
 			case 'getEnvironmentData':
-				// example of args: { remoteAuthority: 'localhost:8080' }
+				// example of args: { remoteAuthority: 'localhost:3100' }
 				const os = platform.OS;
 				const arch = process.arch;
 				const appRoot = URI.file(this.nativeEnvironmentService.appRoot);
@@ -87,7 +87,7 @@ export class RemoteExtensionEnvironmentChannel implements IServerChannel<RemoteA
 				/* example of args:
 				{
 					language: 'en-US',
-					remoteAuthority: 'localhost:8080',
+					remoteAuthority: 'localhost:3100',
 					skipExtensions: []
 				}
 				*/
@@ -122,13 +122,13 @@ export class RemoteExtensionEnvironmentChannel implements IServerChannel<RemoteA
 				/* example of args:
 				{
 					language: 'en-US',
-					remoteAuthority: 'localhost:8080',
+					remoteAuthority: 'localhost:3100',
 					isBuiltin: false,
 					extensionLocation: {
 						'$mid': 1,
 						path: '/.../extensions/extension-1.0.0',
 						scheme: 'vscode-remote',
-						authority: 'localhost:8080'
+						authority: 'localhost:3100'
 					}
 				}
 				*/
