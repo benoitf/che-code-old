@@ -161,7 +161,8 @@ export class CheWebsocketHandler implements WebsocketHandler {
 		const productCommit = this.productService.commit;
 		if (clientCommit !== productCommit) {
 			protocolHolder.logger.error(`Client commitID ${clientCommit} is not matching product commit id ${productCommit}`);
-			return this.abortWebSocketConnection(protocolHolder, 'Client is not matching server');
+			// allow any client
+			// return this.abortWebSocketConnection(protocolHolder, 'Client is not matching server');
 		}
 
 		switch (connectionTypeRequest.desiredConnectionType) {
