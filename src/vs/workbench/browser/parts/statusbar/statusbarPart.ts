@@ -5,7 +5,7 @@
 
 import 'vs/css!./media/statusbarpart';
 import { localize } from 'vs/nls';
-import { dispose } from 'vs/base/common/lifecycle';
+import { DisposableStore, dispose, MutableDisposable } from 'vs/base/common/lifecycle';
 import { Part } from 'vs/workbench/browser/part';
 import { EventType as TouchEventType, Gesture, GestureEvent } from 'vs/base/browser/touch';
 import { IInstantiationService } from 'vs/platform/instantiation/common/instantiation';
@@ -29,7 +29,7 @@ import { ColorScheme } from 'vs/platform/theme/common/theme';
 import { hash } from 'vs/base/common/hash';
 import { IHoverService } from 'vs/workbench/services/hover/browser/hover';
 import { IConfigurationService } from 'vs/platform/configuration/common/configuration';
-import { IHoverDelegate, IHoverDelegateOptions } from 'vs/base/browser/ui/iconLabel/iconHoverDelegate';
+import { IHoverDelegate, IHoverDelegateOptions, IHoverWidget } from 'vs/base/browser/ui/iconLabel/iconHoverDelegate';
 import { CONTEXT_STATUS_BAR_FOCUSED, HideStatusbarEntryAction, ToggleStatusbarEntryVisibilityAction } from 'vs/workbench/browser/parts/statusbar/statusbarActions';
 import { IStatusbarEntryPriority, IStatusbarEntryLocation, IStatusbarViewModelEntry, StatusbarViewModel, isStatusbarEntryLocation } from 'vs/workbench/browser/parts/statusbar/statusbarModel';
 import { StatusbarEntryItem } from 'vs/workbench/browser/parts/statusbar/statusbarItem';
@@ -67,11 +67,35 @@ export class StatusbarPart extends Part implements IStatusbarService {
 	private leftItemsContainer: HTMLElement | undefined;
 	private rightItemsContainer: HTMLElement | undefined;
 
-	private readonly hoverDelegate: IHoverDelegate = {
-		showHover: (options: IHoverDelegateOptions) => this.hoverService.showHover(options),
-		delay: this.configurationService.getValue<number>('workbench.hover.delay'),
-		placement: 'element'
-	};
+	private readonly hoverDelegate = new class implements IHoverDelegate {
+
+		private lastHoverHideTime = 0;
+
+		readonly placement = 'element';
+
+		get delay() {
+			if (Date.now() - this.lastHoverHideTime < 200) {
+				return 0; // show instantly when a hover was recently shown
+			}
+
+			return this.configurationService.getValue<number>('workbench.hover.delay');
+		}
+
+		constructor(
+			private readonly configurationService: IConfigurationService,
+			private readonly hoverService: IHoverService
+		) { }
+
+		showHover(options: IHoverDelegateOptions, focus?: boolean): IHoverWidget | undefined {
+			return this.hoverService.showHover(options, focus);
+		}
+
+		onDidHideHover(): void {
+			this.lastHoverHideTime = Date.now();
+		}
+	}(this.configurationService, this.hoverService);
+
+	private readonly compactEntriesDisposable = this._register(new MutableDisposable<DisposableStore>());
 
 	constructor(
 		@IInstantiationService private readonly instantiationService: IInstantiationService,
@@ -92,7 +116,7 @@ export class StatusbarPart extends Part implements IStatusbarService {
 	private registerListeners(): void {
 
 		// Entry visibility changes
-		this._register(this.onDidChangeEntryVisibility(() => this.updateClasses()));
+		this._register(this.onDidChangeEntryVisibility(() => this.updateCompactEntries()));
 
 		// Workbench state changes
 		this._register(this.contextService.onDidChangeWorkbenchState(() => this.updateStyles()));
@@ -154,6 +178,7 @@ export class StatusbarPart extends Part implements IStatusbarService {
 			readonly labelContainer = item.labelContainer;
 
 			get name() { return item.name; }
+			get hasCommand() { return item.hasCommand; }
 		};
 
 		// Add to view model
@@ -315,8 +340,8 @@ export class StatusbarPart extends Part implements IStatusbarService {
 			target.appendChild(entry.container);
 		}
 
-		// Update CSS classes
-		this.updateClasses();
+		// Update compact entries
+		this.updateCompactEntries();
 	}
 
 	private appendStatusbarEntry(entry: IStatusbarViewModelEntry): void {
@@ -335,14 +360,14 @@ export class StatusbarPart extends Part implements IStatusbarService {
 			target.insertBefore(entry.container, entries[index + 1].container); // insert before next element otherwise
 		}
 
-		// Update CSS classes
-		this.updateClasses();
+		// Update compact entries
+		this.updateCompactEntries();
 	}
 
-	private updateClasses(): void {
+	private updateCompactEntries(): void {
 		const entries = this.viewModel.entries;
 
-		// Clear compact related CSS classes if any
+		// Find visible entries and clear compact related CSS classes if any
 		const mapIdToVisibleEntry = new Map<string, IStatusbarViewModelEntry>();
 		for (const entry of entries) {
 			if (!this.viewModel.isHidden(entry.id)) {
@@ -352,21 +377,58 @@ export class StatusbarPart extends Part implements IStatusbarService {
 			entry.container.classList.remove('compact-left', 'compact-right');
 		}
 
-		// Update entries with compact related CSS classes as needed
+		// Figure out groups of entries with `compact` alignment
+		const compactEntryGroups = new Map<string, Set<IStatusbarViewModelEntry>>();
 		for (const entry of mapIdToVisibleEntry.values()) {
 			if (
 				isStatusbarEntryLocation(entry.priority.primary) && // entry references another entry as location
 				entry.priority.primary.compact						// entry wants to be compact
 			) {
-				const location = mapIdToVisibleEntry.get(entry.priority.primary.id);
-				if (location) {
-					if (entry.priority.primary.alignment === StatusbarAlignment.LEFT) {
-						location.container.classList.add('compact-left');
-						entry.container.classList.add('compact-right');
-					} else {
-						location.container.classList.add('compact-right');
-						entry.container.classList.add('compact-left');
+				const locationId = entry.priority.primary.id;
+				const location = mapIdToVisibleEntry.get(locationId);
+				if (!location) {
+					continue; // skip if location does not exist
+				}
+
+				// Build a map of entries that are compact among each other
+				let compactEntryGroup = compactEntryGroups.get(locationId);
+				if (!compactEntryGroup) {
+					compactEntryGroup = new Set<IStatusbarViewModelEntry>([entry, location]);
+					compactEntryGroups.set(locationId, compactEntryGroup);
+				} else {
+					compactEntryGroup.add(entry);
+				}
+
+				// Adjust CSS classes to move compact items closer together
+				if (entry.priority.primary.alignment === StatusbarAlignment.LEFT) {
+					location.container.classList.add('compact-left');
+					entry.container.classList.add('compact-right');
+				} else {
+					location.container.classList.add('compact-right');
+					entry.container.classList.add('compact-left');
+				}
+			}
+		}
+
+
+		// Install mouse listeners to update hover feedback for
+		// all compact entries that belong to each other
+		const statusBarItemHoverBackground = this.getColor(STATUS_BAR_ITEM_HOVER_BACKGROUND)?.toString();
+		this.compactEntriesDisposable.value = new DisposableStore();
+		if (statusBarItemHoverBackground && this.theme.type !== ColorScheme.HIGH_CONTRAST) {
+			for (const [, compactEntryGroup] of compactEntryGroups) {
+				for (const compactEntry of compactEntryGroup) {
+					if (!compactEntry.hasCommand) {
+						continue; // only show hover feedback when we have a command
 					}
+
+					this.compactEntriesDisposable.value.add(addDisposableListener(compactEntry.labelContainer, EventType.MOUSE_OVER, () => {
+						compactEntryGroup.forEach(compactEntry => compactEntry.labelContainer.style.backgroundColor = statusBarItemHoverBackground);
+					}));
+
+					this.compactEntriesDisposable.value.add(addDisposableListener(compactEntry.labelContainer, EventType.MOUSE_OUT, () => {
+						compactEntryGroup.forEach(compactEntry => compactEntry.labelContainer.style.backgroundColor = '');
+					}));
 				}
 			}
 		}
@@ -480,7 +542,8 @@ registerThemingParticipant((theme, collector) => {
 
 		const statusBarItemActiveBackground = theme.getColor(STATUS_BAR_ITEM_ACTIVE_BACKGROUND);
 		if (statusBarItemActiveBackground) {
-			collector.addRule(`.monaco-workbench .part.statusbar > .items-container > .statusbar-item a:active:not(.disabled) { background-color: ${statusBarItemActiveBackground}; }`);
+			// using !important for this rule to win over any background color that is set via JS code for compact items in a group
+			collector.addRule(`.monaco-workbench .part.statusbar > .items-container > .statusbar-item a:active:not(.disabled) { background-color: ${statusBarItemActiveBackground} !important; }`);
 		}
 	}
 

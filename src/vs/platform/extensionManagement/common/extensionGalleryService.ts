@@ -24,8 +24,8 @@ import { IProductService } from 'vs/platform/product/common/productService';
 import { asJson, asText, IRequestService, isSuccess } from 'vs/platform/request/common/request';
 import { getServiceMachineId } from 'vs/platform/serviceMachineId/common/serviceMachineId';
 import { IStorageService, StorageScope, StorageTarget } from 'vs/platform/storage/common/storage';
-import { ITelemetryService, TelemetryConfiguration, TelemetryLevel } from 'vs/platform/telemetry/common/telemetry';
-import { getTelemetryConfiguration, getTelemetryLevel } from 'vs/platform/telemetry/common/telemetryUtils';
+import { ITelemetryService, TelemetryLevel } from 'vs/platform/telemetry/common/telemetry';
+import { getTelemetryLevel, supportsTelemetry } from 'vs/platform/telemetry/common/telemetryUtils';
 
 const CURRENT_TARGET_PLATFORM = isWeb ? TargetPlatform.WEB : getTargetPlatform(platform, arch);
 
@@ -266,7 +266,7 @@ function getCoreTranslationAssets(version: IRawGalleryExtensionVersion): [string
 function getRepositoryAsset(version: IRawGalleryExtensionVersion): IGalleryExtensionAsset | null {
 	if (version.properties) {
 		const results = version.properties.filter(p => p.key === AssetType.Repository);
-		const gitRegExp = new RegExp('((git|ssh|http(s)?)|(git@[\\w.]+))(:(//)?)([\\w.@\:/\\-~]+)(.git)(/)?');
+		const gitRegExp = new RegExp('((git|ssh|http(s)?)|(git@[\\w.]+))(:(//)?)([\\w.@:/\\-~]+)(.git)(/)?');
 
 		const uri = results.filter(r => gitRegExp.test(r.value))[0];
 		return uri ? { uri: uri.value, fallbackUri: uri.value } : null;
@@ -959,7 +959,7 @@ export async function resolveMarketplaceHeaders(version: string, productService:
 		'User-Agent': `VSCode ${version}`
 	};
 	const uuid = await getServiceMachineId(environmentService, fileService, storageService);
-	if (getTelemetryLevel(productService, environmentService) >= TelemetryLevel.USER && getTelemetryConfiguration(configurationService) === TelemetryConfiguration.ON) {
+	if (supportsTelemetry(productService, environmentService) && getTelemetryLevel(configurationService) === TelemetryLevel.USAGE) {
 		headers['X-Market-User-Id'] = uuid;
 	}
 	return headers;
