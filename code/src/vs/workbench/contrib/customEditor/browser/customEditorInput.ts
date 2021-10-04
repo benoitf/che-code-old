@@ -19,7 +19,6 @@ import { ILabelService } from 'vs/platform/label/common/label';
 import { IUndoRedoService } from 'vs/platform/undoRedo/common/undoRedo';
 import { DEFAULT_EDITOR_ASSOCIATION, EditorInputCapabilities, GroupIdentifier, IRevertOptions, ISaveOptions, isEditorInputWithOptionsAndGroup, IUntypedEditorInput, Verbosity } from 'vs/workbench/common/editor';
 import { EditorInput } from 'vs/workbench/common/editor/editorInput';
-import { decorateFileEditorLabel } from 'vs/workbench/common/editor/resourceEditorInput';
 import { ICustomEditorModel, ICustomEditorService } from 'vs/workbench/contrib/customEditor/common/customEditor';
 import { IWebviewService, WebviewOverlay } from 'vs/workbench/contrib/webview/browser/webview';
 import { IWebviewWorkbenchService, LazilyResolvedWebviewEditorInput } from 'vs/workbench/contrib/webviewPanel/browser/webviewWorkbenchService';
@@ -149,8 +148,7 @@ export class CustomEditorInput extends LazilyResolvedWebviewEditorInput {
 	}
 
 	override getName(): string {
-		const name = basename(this.labelService.getUriLabel(this.resource));
-		return this.decorateLabel(name);
+		return basename(this.labelService.getUriLabel(this.resource));
 	}
 
 	override getDescription(verbosity = Verbosity.MEDIUM): string | undefined {
@@ -222,20 +220,13 @@ export class CustomEditorInput extends LazilyResolvedWebviewEditorInput {
 	override getTitle(verbosity?: Verbosity): string {
 		switch (verbosity) {
 			case Verbosity.SHORT:
-				return this.decorateLabel(this.shortTitle);
+				return this.shortTitle;
 			case Verbosity.LONG:
-				return this.decorateLabel(this.longTitle);
+				return this.longTitle;
 			default:
 			case Verbosity.MEDIUM:
-				return this.decorateLabel(this.mediumTitle);
+				return this.mediumTitle;
 		}
-	}
-
-	private decorateLabel(label: string): string {
-		const readonly = this.hasCapability(EditorInputCapabilities.Readonly);
-		const orphaned = !!this._modelRef?.object.isOrphaned();
-
-		return decorateFileEditorLabel(label, { orphaned, readonly });
 	}
 
 	public override matches(other: EditorInput | IUntypedEditorInput): boolean {
@@ -312,7 +303,6 @@ export class CustomEditorInput extends LazilyResolvedWebviewEditorInput {
 			const oldCapabilities = this.capabilities;
 			this._modelRef = this._register(assertIsDefined(await this.customEditorService.models.tryRetain(this.resource, this.viewType)));
 			this._register(this._modelRef.object.onDidChangeDirty(() => this._onDidChangeDirty.fire()));
-			this._register(this._modelRef.object.onDidChangeOrphaned(() => this._onDidChangeLabel.fire()));
 			this._register(this._modelRef.object.onDidChangeReadonly(() => this._onDidChangeCapabilities.fire()));
 			// If we're loading untitled file data we should ensure it's dirty
 			if (this._untitledDocumentData) {

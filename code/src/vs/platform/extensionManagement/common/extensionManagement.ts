@@ -277,7 +277,7 @@ export const enum SortBy {
 	Title = 2,
 	PublisherName = 3,
 	InstallCount = 4,
-	PublishedDate = 5,
+	PublishedDate = 10,
 	AverageRating = 6,
 	WeightedRating = 12
 }
@@ -392,7 +392,7 @@ export interface IExtensionManagementService {
 	installFromGallery(extension: IGalleryExtension, options?: InstallOptions): Promise<ILocalExtension>;
 	uninstall(extension: ILocalExtension, options?: UninstallOptions): Promise<void>;
 	reinstallFromGallery(extension: ILocalExtension): Promise<void>;
-	getInstalled(type?: ExtensionType): Promise<ILocalExtension[]>;
+	getInstalled(type?: ExtensionType, donotIgnoreInvalidExtensions?: boolean): Promise<ILocalExtension[]>;
 	getExtensionsReport(): Promise<IReportedExtension[]>;
 
 	updateMetadata(local: ILocalExtension, metadata: IGalleryMetadata): Promise<ILocalExtension>;

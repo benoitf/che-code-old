@@ -522,7 +522,15 @@ export const enum EditorInputCapabilities {
 	 * Signals that the editor can split into 2 in the same
 	 * editor group.
 	 */
-	CanSplitInGroup = 1 << 5
+	CanSplitInGroup = 1 << 5,
+
+	/**
+	 * Signals that the editor wants it's description to be
+	 * visible when presented to the user. By default, a UI
+	 * component may decide to hide the description portion
+	 * for brevity.
+	 */
+	ForceDescription = 1 << 6
 }
 
 export type IUntypedEditorInput = IResourceEditorInput | ITextResourceEditorInput | IUntitledTextResourceEditorInput | IResourceDiffEditorInput | IResourceSideBySideEditorInput;
@@ -535,7 +543,7 @@ export function isEditorInput(editor: unknown): editor is EditorInput {
 	return editor instanceof AbstractEditorInput;
 }
 
-export interface IEditorInputWithPreferredResource {
+export interface EditorInputWithPreferredResource {
 
 	/**
 	 * An editor may provide an additional preferred resource alongside
@@ -557,8 +565,8 @@ export interface IEditorInputWithPreferredResource {
 	readonly preferredResource: URI;
 }
 
-function isEditorInputWithPreferredResource(editor: unknown): editor is IEditorInputWithPreferredResource {
-	const candidate = editor as IEditorInputWithPreferredResource | undefined;
+function isEditorInputWithPreferredResource(editor: unknown): editor is EditorInputWithPreferredResource {
+	const candidate = editor as EditorInputWithPreferredResource | undefined;
 
 	return URI.isUri(candidate?.preferredResource);
 }
@@ -613,7 +621,7 @@ export interface IUntypedFileEditorInput extends ITextResourceEditorInput {
  * This is a tagging interface to declare an editor input being capable of dealing with files. It is only used in the editor registry
  * to register this kind of input to the platform.
  */
-export interface IFileEditorInput extends EditorInput, IEncodingSupport, IModeSupport, IEditorInputWithPreferredResource {
+export interface IFileEditorInput extends EditorInput, IEncodingSupport, IModeSupport, EditorInputWithPreferredResource {
 
 	/**
 	 * Gets the resource this file input is about. This will always be the
@@ -672,23 +680,23 @@ export interface IFileEditorInput extends EditorInput, IEncodingSupport, IModeSu
 	isResolved(): boolean;
 }
 
-export interface IEditorInputWithOptions {
+export interface EditorInputWithOptions {
 	editor: EditorInput;
 	options?: IEditorOptions;
 }
 
-export interface IEditorInputWithOptionsAndGroup extends IEditorInputWithOptions {
+export interface EditorInputWithOptionsAndGroup extends EditorInputWithOptions {
 	group: IEditorGroup;
 }
 
-export function isEditorInputWithOptions(editor: unknown): editor is IEditorInputWithOptions {
-	const candidate = editor as IEditorInputWithOptions | undefined;
+export function isEditorInputWithOptions(editor: unknown): editor is EditorInputWithOptions {
+	const candidate = editor as EditorInputWithOptions | undefined;
 
 	return isEditorInput(candidate?.editor);
 }
 
-export function isEditorInputWithOptionsAndGroup(editor: unknown): editor is IEditorInputWithOptionsAndGroup {
-	const candidate = editor as IEditorInputWithOptionsAndGroup | undefined;
+export function isEditorInputWithOptionsAndGroup(editor: unknown): editor is EditorInputWithOptionsAndGroup {
+	const candidate = editor as EditorInputWithOptionsAndGroup | undefined;
 
 	return isEditorInputWithOptions(editor) && candidate?.group !== undefined;
 }
@@ -730,17 +738,86 @@ export interface IEditorCommandsContext {
 	editorIndex?: number;
 }
 
+/**
+ * More information around why an editor was closed in the model.
+ */
+export enum EditorCloseContext {
+
+	/**
+	 * No specific context for closing (e.g. explicit user gesture).
+	 */
+	UNKNOWN,
+
+	/**
+	 * The editor closed because it was in preview mode and got replaced.
+	 */
+	REPLACE,
+
+	/**
+	 * The editor closed as a result of moving it to another group.
+	 */
+	MOVE,
+
+	/**
+	 * The editor closed because another editor turned into preview
+	 * and this used to be the preview editor before.
+	 */
+	UNPIN
+}
+
 export interface IEditorCloseEvent extends IEditorIdentifier {
-	replaced: boolean;
-	index: number;
-	sticky: boolean;
+
+	/**
+	 * More information around why the editor was closed.
+	 */
+	readonly context: EditorCloseContext;
+
+	/**
+	 * The index of the editor before closing.
+	 */
+	readonly index: number;
+
+	/**
+	 * Whether the editor was sticky or not.
+	 */
+	readonly sticky: boolean;
+}
+
+export interface IEditorWillMoveEvent extends IEditorIdentifier {
+
+	/**
+	 * The target group of the move operation.
+	 */
+	readonly target: GroupIdentifier;
 }
 
 export interface IEditorMoveEvent extends IEditorIdentifier {
-	target: GroupIdentifier;
+
+	/**
+	 * The target group of the move operation.
+	 */
+	readonly target: GroupIdentifier;
+
+	/**
+	 * The index of the editor before moving.
+	 */
+	readonly index: number;
+
+	/**
+	 * The index of the editor after moving.
+	 */
+	readonly newIndex: number;
 }
 
-export interface IEditorOpenEvent extends IEditorIdentifier { }
+export interface IEditorWillOpenEvent extends IEditorIdentifier { }
+
+export interface IEditorOpenEvent extends IEditorIdentifier {
+
+	/**
+	 * The index the editor opens in.
+	 */
+	readonly index: number;
+}
 
 export type GroupIdentifier = number;
 
@@ -769,7 +846,7 @@ interface IEditorPartConfiguration {
 	openPositioning?: 'left' | 'right' | 'first' | 'last';
 	openSideBySideDirection?: 'right' | 'down';
 	closeEmptyGroups?: boolean;
-	experimentalAutoLockGroups?: Set<string>;
+	autoLockGroups?: Set<string>;
 	revealIfOpen?: boolean;
 	mouseBackForwardToNavigate?: boolean;
 	labelFormat?: 'default' | 'short' | 'medium' | 'long';
