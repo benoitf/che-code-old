@@ -137,6 +137,12 @@ export class CellOutputElement extends Disposable {
 		}
 	}
 
+	forceReadDOM() {
+		if (this.useDedicatedDOM && this.innerContainer) {
+			this._height = this.innerContainer.offsetHeight;
+		}
+	}
+
 	updateDOMTop(top: number) {
 		if (this.useDedicatedDOM) {
 			if (this.innerContainer) {
@@ -233,7 +239,7 @@ export class CellOutputElement extends Disposable {
 	render(previousSibling: HTMLElement | undefined, forceBreakStreaming: boolean = false): IRenderResult | undefined {
 		const index = this.viewCell.outputsViewModels.indexOf(this.output);
 
-		if (this.viewCell.metadata.outputCollapsed || !this.notebookEditor.hasModel()) {
+		if (this.viewCell.isOutputCollapsed || !this.notebookEditor.hasModel()) {
 			return undefined;
 		}
 
@@ -481,7 +487,7 @@ export class CellOutputElement extends Disposable {
 		this.viewCell.updateOutputMinHeight(this.viewCell.layoutInfo.outputTotalHeight);
 
 		const { mimeType, rendererId } = mimeTypes[pick.index];
-		this.notebookService.updateMimePreferredRenderer(mimeType, rendererId);
+		this.notebookService.updateMimePreferredRenderer(notebookTextModel.viewType, mimeType, rendererId, mimeTypes.map(m => m.mimeType));
 		this.render(nextElement as HTMLElement);
 		this._validateFinalOutputHeight(false);
 		this._relayoutCell();
@@ -639,6 +645,8 @@ export class CellOutputContainer extends Disposable {
 				if (outputEntry.renderResult.type !== RenderOutputType.Mainframe) {
 					this.notebookEditor.createOutput(this.viewCell, outputEntry.renderResult as IInsetRenderOutput, this.viewCell.getOutputOffset(index));
 				} else if (!initRendering) {
+					// force read otherwise the real height is updated in next frame through resize observer
+					outputEntry.forceReadDOM();
 					this.viewCell.updateOutputHeight(index, outputEntry.domOffsetHeight, 'CellOutputContainer#viewUpdateShowOutputs');
 				}
 			} else {

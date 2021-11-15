@@ -288,7 +288,10 @@ abstract class AbstractTreeView extends Disposable implements ITreeView {
 				}
 			};
 			if (this._dataProvider.onDidChangeEmpty) {
-				this._register(this._dataProvider.onDidChangeEmpty(() => this._onDidChangeWelcomeState.fire()));
+				this._register(this._dataProvider.onDidChangeEmpty(() => {
+					this.updateCollapseAllToggle();
+					this._onDidChangeWelcomeState.fire();
+				}));
 			}
 			this.updateMessage();
 			this.refresh();
@@ -919,9 +922,8 @@ class TreeRenderer extends Disposable implements ITreeRenderer<ITreeItem, FuzzyS
 
 		return {
 			markdown: (token: CancellationToken): Promise<IMarkdownString | string | undefined> => {
-				return new Promise<IMarkdownString | string | undefined>(async (resolve) => {
-					await node.resolve(token);
-					resolve(node.tooltip);
+				return new Promise<IMarkdownString | string | undefined>((resolve) => {
+					node.resolve(token).then(() => resolve(node.tooltip));
 				});
 			},
 			markdownNotSupportedFallback: resource ? undefined : label ?? '' // Passing undefined as the fallback for a resource falls back to the old native hover

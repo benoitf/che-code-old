@@ -23,6 +23,11 @@ Code cell outputs and markdown cells are both rendered in the underling webview.
 
 Whether users would see flickering or overlap of outputs, monaco editor and markdown cells depends on the latency between 3.2 and 3.3.
 
+### What's the catch
+
+Setting `overflow: hidden` turns out to be imperfect. When we replace outputs (or just in place rerender), due to the existence of `overflow: hidden`, the whole output container will be invisible for a super short period (as height changes to zero and we have a `max-height = 0`) and then show up again. This will cause unexpected flash https://github.com/microsoft/vscode/issues/132143#issuecomment-958495698. You won't see this without `overflow: hidden` as the browser is smart enough to know how to replace the old with the new DOM node without noticeable delay.
+
+
 ## Re-executing code cell followed by markdown cells
 
 Re-exuecting code cell consists of two steps:
@@ -63,3 +68,29 @@ Code cell outputs and markdown cells are rendered in the webview, which are asyn
 However, we **don't** warmup the previous viewport as the cell height change of previous viewport might trigger the flickering of markdown cells in current viewport. Before we optimize this, do not do any warmup of cells before current viewport.
 
 
+
+## Focus Tracking
+
+Due to the nature of virtualization (list view) and two layers architecture, the focus tracking is more complex compared to file explorer or monaco editor. When a notebook is *focused*, the `document.activeElement` can be
+
+* Monaco editor, when users focus on a cell editor
+  * `textarea` when users focus the text
+  * Widgets
+* Webview/iframe, when users focus on markdown cell or rich outputs rendered rendered in iframe
+* List view container, when users focus on cell container
+* Focusable element inside the notebook editor
+  * Builtin output (e.g., text output)
+  * Find Widget
+  * Cell statusbar
+  * Toolbars
+
+The catch here is if the focus is on a monaco editor, instead of the list view container, when the cell is moved out of view, the list view removes the cell row from the DOM tree. The `document.activeElement` will fall back `document.body` when that happens. To ensure that the notebook editor doesn't blur, we need to move focus back to list view container when the focused cell is moved out of view. More importantly, focus the cell editor again when the cell is visible again (if the cell is still the *active* cell).
+
+Copy in Notebook depends on the focus tracking
+
+* Send `document.executeCommand('copy')` if users select text in output rendered in main frame by builtin renderer
+* Request webview copy if the focus is inside the webview
+* Copy cells if the focus is on notebook cell list
+* Copy text if the focus is in cell editor (monaco editor)
+
+![diagram](https://user-images.githubusercontent.com/876920/141730905-2818043e-1a84-45d3-ad27-83bd89235ca5.png)

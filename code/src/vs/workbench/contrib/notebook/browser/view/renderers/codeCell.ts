@@ -13,6 +13,7 @@ import { IDimension } from 'vs/editor/common/editorCommon';
 import { IReadonlyTextBuffer } from 'vs/editor/common/model';
 import { TokenizationRegistry } from 'vs/editor/common/modes';
 import { tokenizeToString } from 'vs/editor/common/modes/textToHtmlTokenizer';
+import { IModeService } from 'vs/editor/common/services/modeService';
 import { localize } from 'vs/nls';
 import { IInstantiationService } from 'vs/platform/instantiation/common/instantiation';
 import { IKeybindingService } from 'vs/platform/keybinding/common/keybinding';
@@ -40,211 +41,25 @@ export class CodeCell extends Disposable {
 		@IInstantiationService private readonly instantiationService: IInstantiationService,
 		@INotebookCellStatusBarService readonly notebookCellStatusBarService: INotebookCellStatusBarService,
 		@IKeybindingService readonly keybindingService: IKeybindingService,
-		@IOpenerService readonly openerService: IOpenerService
+		@IOpenerService readonly openerService: IOpenerService,
+		@IModeService readonly modeService: IModeService,
 	) {
 		super();
 
-		const width = this.viewCell.layoutInfo.editorWidth;
-		const lineNum = this.viewCell.lineCount;
-		const lineHeight = this.viewCell.layoutInfo.fontInfo?.lineHeight || 17;
-		const editorPadding = this.notebookEditor.notebookOptions.computeEditorPadding(this.viewCell.internalMetadata);
-
-		// patch up focusMode
-		if (this.viewCell.focusMode === CellFocusMode.Editor && this.notebookEditor.getActiveCell() !== this.viewCell) {
-			this.viewCell.focusMode = CellFocusMode.Container;
-		}
-
-		const editorHeight = this.viewCell.layoutInfo.editorHeight === 0
-			? lineNum * lineHeight + editorPadding.top + editorPadding.bottom
-			: this.viewCell.layoutInfo.editorHeight;
-
-		this.layoutEditor(
-			{
-				width: width,
-				height: editorHeight
-			}
-		);
-
-		const cts = new CancellationTokenSource();
-		this._register({ dispose() { cts.dispose(true); } });
-		raceCancellation(viewCell.resolveTextModel(), cts.token).then(model => {
-			if (this._isDisposed) {
-				return;
-			}
-
-			if (model && templateData.editor) {
-				templateData.editor.setModel(model);
-				viewCell.attachTextEditor(templateData.editor);
-				const focusEditorIfNeeded = () => {
-					if (
-						notebookEditor.getActiveCell() === viewCell &&
-						viewCell.focusMode === CellFocusMode.Editor &&
-						(this.notebookEditor.hasEditorFocus() || document.activeElement === document.body)) // Don't steal focus from other workbench parts, but if body has focus, we can take it
-					{
-						templateData.editor?.focus();
-					}
-				};
-				focusEditorIfNeeded();
-
-				const realContentHeight = templateData.editor?.getContentHeight();
-				if (realContentHeight !== undefined && realContentHeight !== editorHeight) {
-					this.onCellEditorHeightChange(realContentHeight);
-				}
-
-				focusEditorIfNeeded();
-			}
-		});
-
-		const updateForFocusMode = () => {
-			if (viewCell.focusMode === CellFocusMode.Editor && this.notebookEditor.getActiveCell() === this.viewCell) {
-				templateData.editor?.focus();
-			}
-
-			templateData.container.classList.toggle('cell-editor-focus', viewCell.focusMode === CellFocusMode.Editor);
-		};
-		this._register(viewCell.onDidChangeState((e) => {
-			if (e.focusModeChanged) {
-				updateForFocusMode();
-			}
-		}));
-		updateForFocusMode();
-
-		const updateEditorOptions = () => {
-			const editor = templateData.editor;
-			if (!editor) {
-				return;
-			}
-
-			const isReadonly = notebookEditor.isReadOnly;
-			const padding = notebookEditor.notebookOptions.computeEditorPadding(viewCell.internalMetadata);
-			const options = editor.getOptions();
-			if (options.get(EditorOption.readOnly) !== isReadonly || options.get(EditorOption.padding) !== padding) {
-				editor.updateOptions({ readOnly: notebookEditor.isReadOnly, padding: notebookEditor.notebookOptions.computeEditorPadding(viewCell.internalMetadata) });
-			}
-		};
-
-		updateEditorOptions();
-		this._register(viewCell.onDidChangeState((e) => {
-			if (e.metadataChanged || e.internalMetadataChanged) {
-				updateEditorOptions();
-
-				if (this.updateForCollapseState()) {
-					this.relayoutCell();
-				}
-			}
-		}));
-
-		this._register(viewCell.onDidChangeLayout((e) => {
-			if (e.outerWidth !== undefined) {
-				const layoutInfo = templateData.editor.getLayoutInfo();
-				if (layoutInfo.width !== viewCell.layoutInfo.editorWidth) {
-					this.onCellWidthChange();
-				}
-			}
-
-			if (e.totalHeight) {
-				this.relayoutCell();
-			}
-		}));
-
-		this._register(templateData.editor.onDidContentSizeChange((e) => {
-			if (e.contentHeightChanged) {
-				if (this.viewCell.layoutInfo.editorHeight !== e.contentHeight) {
-					this.onCellEditorHeightChange(e.contentHeight);
-				}
-			}
-		}));
-
-		this._register(templateData.editor.onDidChangeCursorSelection((e) => {
-			if (e.source === 'restoreState') {
-				// do not reveal the cell into view if this selection change was caused by restoring editors...
-				return;
-			}
-
-			const primarySelection = templateData.editor.getSelection();
-
-			if (primarySelection) {
-				this.notebookEditor.revealLineInViewAsync(viewCell, primarySelection.positionLineNumber);
-			}
-		}));
-
-		// Apply decorations
-		this._register(viewCell.onCellDecorationsChanged((e) => {
-			e.added.forEach(options => {
-				if (options.className) {
-					templateData.rootContainer.classList.add(options.className);
-				}
-
-				if (options.outputClassName) {
-					this.notebookEditor.deltaCellOutputContainerClassNames(this.viewCell.id, [options.outputClassName], []);
-				}
-			});
-
-			e.removed.forEach(options => {
-				if (options.className) {
-					templateData.rootContainer.classList.remove(options.className);
-				}
-
-				if (options.outputClassName) {
-					this.notebookEditor.deltaCellOutputContainerClassNames(this.viewCell.id, [], [options.outputClassName]);
-				}
-			});
-		}));
-
-		viewCell.getCellDecorations().forEach(options => {
-			if (options.className) {
-				templateData.rootContainer.classList.add(options.className);
-			}
-
-			if (options.outputClassName) {
-				this.notebookEditor.deltaCellOutputContainerClassNames(this.viewCell.id, [options.outputClassName], []);
-			}
-		});
-
-		// Mouse click handlers
-		this._register(templateData.statusBar.onDidClick(e => {
-			if (e.type !== ClickTargetType.ContributedCommandItem) {
-				const target = templateData.editor.getTargetAtClientPoint(e.event.clientX, e.event.clientY - this.notebookEditor.notebookOptions.computeEditorStatusbarHeight(viewCell.internalMetadata));
-				if (target?.position) {
-					templateData.editor.setPosition(target.position);
-					templateData.editor.focus();
-				}
-			}
-		}));
-
-		this._register(templateData.editor.onMouseDown(e => {
-			// prevent default on right mouse click, otherwise it will trigger unexpected focus changes
-			// the catch is, it means we don't allow customization of right button mouse down handlers other than the built in ones.
-			if (e.event.rightButton) {
-				e.event.preventDefault();
-			}
-		}));
-
-		// Focus Mode
-		const updateFocusMode = () => {
-			viewCell.focusMode =
-				(templateData.editor.hasWidgetFocus() || (document.activeElement && this.templateData.statusBar.statusBarContainer.contains(document.activeElement)))
-					? CellFocusMode.Editor
-					: CellFocusMode.Container;
-		};
-
-		this._register(templateData.editor.onDidFocusEditorWidget(() => {
-			updateFocusMode();
-		}));
-		this._register(templateData.editor.onDidBlurEditorWidget(() => {
-			// this is for a special case:
-			// users click the status bar empty space, which we will then focus the editor
-			// so we don't want to update the focus state too eagerly, it will be updated with onDidFocusEditorWidget
-			if (!(document.activeElement && this.templateData.statusBar.statusBarContainer.contains(document.activeElement))) {
-				updateFocusMode();
-			}
-		}));
+		const editorHeight = this.calculateInitEditorHeight();
+		this.initializeEditor(editorHeight);
+		this.registerEditorOptionsListener();
+		this.registerViewCellStateChange();
+		this.registerFocusModeTracker();
+		this.registerEditorLayoutListeners();
+		this.registerDecorations();
+		this.registerMouseListener();
 
 		// Render Outputs
 		this._outputContainerRenderer = this.instantiationService.createInstance(CellOutputContainer, notebookEditor, viewCell, templateData, { limit: 500 });
 		this._outputContainerRenderer.render(editorHeight);
 		// Need to do this after the intial renderOutput
-		if (this.viewCell.metadata.outputCollapsed === undefined && this.viewCell.metadata.inputCollapsed === undefined) {
+		if (this.viewCell.isOutputCollapsed === undefined && this.viewCell.isInputCollapsed === undefined) {
 			this.initialViewUpdateExpanded();
 			this.viewCell.layoutChange({});
 		}
@@ -256,21 +71,238 @@ export class CodeCell extends Disposable {
 		this.updateForCollapseState();
 	}
 
+	private calculateInitEditorHeight() {
+		const lineNum = this.viewCell.lineCount;
+		const lineHeight = this.viewCell.layoutInfo.fontInfo?.lineHeight || 17;
+		const editorPadding = this.notebookEditor.notebookOptions.computeEditorPadding(this.viewCell.internalMetadata);
+		const editorHeight = this.viewCell.layoutInfo.editorHeight === 0
+			? lineNum * lineHeight + editorPadding.top + editorPadding.bottom
+			: this.viewCell.layoutInfo.editorHeight;
+		return editorHeight;
+	}
+
+	private initializeEditor(initEditorHeight: number) {
+		const width = this.viewCell.layoutInfo.editorWidth;
+		this.layoutEditor(
+			{
+				width: width,
+				height: initEditorHeight
+			}
+		);
+
+		const cts = new CancellationTokenSource();
+		this._register({ dispose() { cts.dispose(true); } });
+		raceCancellation(this.viewCell.resolveTextModel(), cts.token).then(model => {
+			if (this._isDisposed) {
+				return;
+			}
+
+			if (model && this.templateData.editor) {
+				this.templateData.editor.setModel(model);
+				this.viewCell.attachTextEditor(this.templateData.editor);
+				const focusEditorIfNeeded = () => {
+					if (
+						this.notebookEditor.getActiveCell() === this.viewCell &&
+						this.viewCell.focusMode === CellFocusMode.Editor &&
+						(this.notebookEditor.hasEditorFocus() || document.activeElement === document.body)) // Don't steal focus from other workbench parts, but if body has focus, we can take it
+					{
+						this.templateData.editor?.focus();
+					}
+				};
+				focusEditorIfNeeded();
+
+				const realContentHeight = this.templateData.editor?.getContentHeight();
+				if (realContentHeight !== undefined && realContentHeight !== initEditorHeight) {
+					this.onCellEditorHeightChange(realContentHeight);
+				}
+
+				focusEditorIfNeeded();
+			}
+		});
+	}
+
+	private registerEditorOptionsListener() {
+		const updateEditorOptions = () => {
+			const editor = this.templateData.editor;
+			if (!editor) {
+				return;
+			}
+
+			const isReadonly = this.notebookEditor.isReadOnly;
+			const padding = this.notebookEditor.notebookOptions.computeEditorPadding(this.viewCell.internalMetadata);
+			const options = editor.getOptions();
+			if (options.get(EditorOption.readOnly) !== isReadonly || options.get(EditorOption.padding) !== padding) {
+				editor.updateOptions({ readOnly: this.notebookEditor.isReadOnly, padding: this.notebookEditor.notebookOptions.computeEditorPadding(this.viewCell.internalMetadata) });
+			}
+		};
+
+		updateEditorOptions();
+		this._register(this.viewCell.onDidChangeState((e) => {
+			if (e.metadataChanged || e.internalMetadataChanged) {
+				updateEditorOptions();
+			}
+		}));
+	}
+
+	private registerViewCellStateChange() {
+		this._register(this.viewCell.onDidChangeState((e) => {
+			if (e.inputCollapsedChanged || e.outputCollapsedChanged) {
+				this.viewCell.pauseLayout();
+				const updated = this.updateForCollapseState();
+				this.viewCell.resumeLayout();
+				if (updated) {
+					this.relayoutCell();
+				}
+			}
+		}));
+
+		this._register(this.viewCell.onDidChangeLayout((e) => {
+			if (e.outerWidth !== undefined) {
+				const layoutInfo = this.templateData.editor.getLayoutInfo();
+				if (layoutInfo.width !== this.viewCell.layoutInfo.editorWidth) {
+					this.onCellWidthChange();
+				}
+			}
+
+			if (e.totalHeight) {
+				this.relayoutCell();
+			}
+		}));
+	}
+
+	private registerEditorLayoutListeners() {
+		this._register(this.templateData.editor.onDidContentSizeChange((e) => {
+			if (e.contentHeightChanged) {
+				if (this.viewCell.layoutInfo.editorHeight !== e.contentHeight) {
+					this.onCellEditorHeightChange(e.contentHeight);
+				}
+			}
+		}));
+
+		this._register(this.templateData.editor.onDidChangeCursorSelection((e) => {
+			if (e.source === 'restoreState') {
+				// do not reveal the cell into view if this selection change was caused by restoring editors...
+				return;
+			}
+
+			const primarySelection = this.templateData.editor.getSelection();
+
+			if (primarySelection) {
+				this.notebookEditor.revealLineInViewAsync(this.viewCell, primarySelection.positionLineNumber);
+			}
+		}));
+	}
+
+	private registerDecorations() {
+		// Apply decorations
+		this._register(this.viewCell.onCellDecorationsChanged((e) => {
+			e.added.forEach(options => {
+				if (options.className) {
+					this.templateData.rootContainer.classList.add(options.className);
+				}
+
+				if (options.outputClassName) {
+					this.notebookEditor.deltaCellOutputContainerClassNames(this.viewCell.id, [options.outputClassName], []);
+				}
+			});
+
+			e.removed.forEach(options => {
+				if (options.className) {
+					this.templateData.rootContainer.classList.remove(options.className);
+				}
+
+				if (options.outputClassName) {
+					this.notebookEditor.deltaCellOutputContainerClassNames(this.viewCell.id, [], [options.outputClassName]);
+				}
+			});
+		}));
+
+		this.viewCell.getCellDecorations().forEach(options => {
+			if (options.className) {
+				this.templateData.rootContainer.classList.add(options.className);
+			}
+
+			if (options.outputClassName) {
+				this.notebookEditor.deltaCellOutputContainerClassNames(this.viewCell.id, [options.outputClassName], []);
+			}
+		});
+	}
+
+	private registerMouseListener() {
+		// Mouse click handlers
+		this._register(this.templateData.statusBar.onDidClick(e => {
+			if (e.type !== ClickTargetType.ContributedCommandItem) {
+				const target = this.templateData.editor.getTargetAtClientPoint(e.event.clientX, e.event.clientY - this.notebookEditor.notebookOptions.computeEditorStatusbarHeight(this.viewCell.internalMetadata));
+				if (target?.position) {
+					this.templateData.editor.setPosition(target.position);
+					this.templateData.editor.focus();
+				}
+			}
+		}));
+
+		this._register(this.templateData.editor.onMouseDown(e => {
+			// prevent default on right mouse click, otherwise it will trigger unexpected focus changes
+			// the catch is, it means we don't allow customization of right button mouse down handlers other than the built in ones.
+			if (e.event.rightButton) {
+				e.event.preventDefault();
+			}
+		}));
+	}
+
+	private registerFocusModeTracker() {
+		const updateEditorForFocusModeChange = () => {
+			if (this.viewCell.focusMode === CellFocusMode.Editor && this.notebookEditor.getActiveCell() === this.viewCell) {
+				this.templateData.editor?.focus();
+			}
+
+			this.templateData.container.classList.toggle('cell-editor-focus', this.viewCell.focusMode === CellFocusMode.Editor);
+		};
+		this._register(this.viewCell.onDidChangeState((e) => {
+			if (e.focusModeChanged) {
+				updateEditorForFocusModeChange();
+			}
+		}));
+
+		updateEditorForFocusModeChange();
+
+		// Focus Mode
+		const updateFocusModeForEditorEvent = () => {
+			this.viewCell.focusMode =
+				(this.templateData.editor.hasWidgetFocus() || (document.activeElement && this.templateData.statusBar.statusBarContainer.contains(document.activeElement)))
+					? CellFocusMode.Editor
+					: CellFocusMode.Container;
+		};
+
+		this._register(this.templateData.editor.onDidFocusEditorWidget(() => {
+			updateFocusModeForEditorEvent();
+		}));
+		this._register(this.templateData.editor.onDidBlurEditorWidget(() => {
+			// this is for a special case:
+			// users click the status bar empty space, which we will then focus the editor
+			// so we don't want to update the focus state too eagerly, it will be updated with onDidFocusEditorWidget
+			if (
+				this.notebookEditor.hasEditorFocus() &&
+				!(document.activeElement && this.templateData.statusBar.statusBarContainer.contains(document.activeElement))) {
+				updateFocusModeForEditorEvent();
+			}
+		}));
+	}
+
 	private updateForCollapseState(): boolean {
-		if (this.viewCell.metadata.outputCollapsed === this._renderedOutputCollapseState &&
-			this.viewCell.metadata.inputCollapsed === this._renderedInputCollapseState) {
+		if (this.viewCell.isOutputCollapsed === this._renderedOutputCollapseState &&
+			this.viewCell.isInputCollapsed === this._renderedInputCollapseState) {
 			return false;
 		}
 
-		this.viewCell.layoutChange({});
+		this.viewCell.layoutChange({ editorHeight: true });
 
-		if (this.viewCell.metadata.inputCollapsed) {
+		if (this.viewCell.isInputCollapsed) {
 			this._collapseInput();
 		} else {
 			this._showInput();
 		}
 
-		if (this.viewCell.metadata.outputCollapsed) {
+		if (this.viewCell.isOutputCollapsed) {
 			this._collapseOutput();
 		} else {
 			this._showOutput(false);
@@ -278,8 +310,8 @@ export class CodeCell extends Disposable {
 
 		this.relayoutCell();
 
-		this._renderedOutputCollapseState = this.viewCell.metadata.outputCollapsed;
-		this._renderedInputCollapseState = this.viewCell.metadata.inputCollapsed;
+		this._renderedOutputCollapseState = this.viewCell.isOutputCollapsed;
+		this._renderedInputCollapseState = this.viewCell.isInputCollapsed;
 
 		return true;
 	}
@@ -319,7 +351,7 @@ export class CodeCell extends Disposable {
 	}
 
 	private _getRichText(buffer: IReadonlyTextBuffer, language: string) {
-		return tokenizeToString(buffer.getLineContent(1), TokenizationRegistry.get(language)!);
+		return tokenizeToString(buffer.getLineContent(1), this.modeService.languageIdCodec, TokenizationRegistry.get(language)!);
 	}
 
 	private _removeInputCollapsePreview() {
@@ -409,6 +441,11 @@ export class CodeCell extends Disposable {
 
 	override dispose() {
 		this._isDisposed = true;
+
+		// move focus back to the cell list otherwise the focus goes to body
+		if (this.notebookEditor.getActiveCell() === this.viewCell && this.viewCell.focusMode === CellFocusMode.Editor) {
+			this.notebookEditor.focusContainer();
+		}
 
 		this.viewCell.detachTextEditor();
 		this._removeInputCollapsePreview();

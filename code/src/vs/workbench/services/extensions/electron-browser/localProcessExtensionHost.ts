@@ -48,6 +48,7 @@ import { IShellEnvironmentService } from 'vs/workbench/services/environment/elec
 import { IExtensionHostProcessOptions, IExtensionHostStarter } from 'vs/platform/extensions/common/extensionHostStarter';
 import { SerializedError } from 'vs/base/common/errors';
 import { StopWatch } from 'vs/base/common/stopwatch';
+import { removeDangerousEnvVariables } from 'vs/base/node/processes';
 
 export interface ILocalProcessExtensionHostInitData {
 	readonly autoStart: boolean;
@@ -235,15 +236,11 @@ export class LocalProcessExtensionHost implements IExtensionHost {
 					VSCODE_LOG_LEVEL: this._environmentService.verbose ? 'trace' : this._environmentService.log
 				});
 
-				// Unset `DEBUG`, as an invalid value might lead to extension host crashes
-				// See https://github.com/microsoft/vscode/issues/130072
-				delete env['DEBUG'];
-
-				if (platform.isMacintosh) {
-					// Unset `DYLD_LIBRARY_PATH`, as it leads to extension host crashes
-					// See https://github.com/microsoft/vscode/issues/104525
-					delete env['DYLD_LIBRARY_PATH'];
+				if (this._environmentService.debugExtensionHost.env) {
+					objects.mixin(env, this._environmentService.debugExtensionHost.env);
 				}
+
+				removeDangerousEnvVariables(env);
 
 				if (this._isExtensionDevHost) {
 					// Unset `VSCODE_CODE_CACHE_PATH` when developing extensions because it might
@@ -280,6 +277,7 @@ export class LocalProcessExtensionHost implements IExtensionHost {
 				}
 
 				// On linux crash reporter needs to be started on child node processes explicitly
+				// TODO@bpasero TODO@deepak1556 remove once we updated to Electron 15
 				if (platform.isLinux) {
 					const crashReporterStartOptions: CrashReporterStartOptions = {
 						companyName: this._productService.crashReporter?.companyName || 'Microsoft',
@@ -364,6 +362,8 @@ export class LocalProcessExtensionHost implements IExtensionHost {
 				let startupTimeoutHandle: any;
 				if (!this._environmentService.isBuilt && !this._environmentService.remoteAuthority || this._isExtensionDevHost) {
 					startupTimeoutHandle = setTimeout(() => {
+						this._logService.error(`[LocalProcessExtensionHost]: Extension host did not start in 10 seconds (debugBrk: ${this._isExtensionDevDebugBrk})`);
+
 						const msg = this._isExtensionDevDebugBrk
 							? nls.localize('extensionHost.startupFailDebug', "Extension host did not start in 10 seconds, it might be stopped on the first line and needs a debugger to continue.")
 							: nls.localize('extensionHost.startupFail', "Extension host did not start in 10 seconds, that might be a problem.");
@@ -378,25 +378,15 @@ export class LocalProcessExtensionHost implements IExtensionHost {
 					}, 10000);
 				}
 
-				const sw = new StopWatch(false);
-				return this._extensionHostProcess.start(opts).then(() => {
-					sw.stop();
-					timer.markDidStartExtensionHost();
+				// Initialize extension host process with hand shakes
+				return this._tryExtHostHandshake(opts, timer).then((protocol) => {
+					timer.markDidFinishHandhsake();
 
-					if (sw.elapsed() > 500) {
-						// communicating to the shared process took more than 500ms
-						this._logService.info(`[LocalProcessExtensionHost]: IExtensionHostStarter.start() took ${sw.elapsed()} ms.`);
-					}
-					// Initialize extension host process with hand shakes
-					return this._tryExtHostHandshake(timer).then((protocol) => {
-						timer.markDidFinishHandhsake();
+					const localProcessExtensionHostStartupTimesEvent = timer.toEvent();
+					this._telemetryService.publicLog2<LocalProcessExtensionHostStartupTimesEvent, LocalProcessExtensionHostStartupTimesClassification>('localProcessExtensionHostStartupTimes', localProcessExtensionHostStartupTimesEvent);
 
-						const localProcessExtensionHostStartupTimesEvent = timer.toEvent();
-						this._telemetryService.publicLog2<LocalProcessExtensionHostStartupTimesEvent, LocalProcessExtensionHostStartupTimesClassification>('localProcessExtensionHostStartupTimes', localProcessExtensionHostStartupTimesEvent);
-
-						clearTimeout(startupTimeoutHandle);
-						return protocol;
-					});
+					clearTimeout(startupTimeoutHandle);
+					return protocol;
 				});
 			});
 		}
@@ -452,7 +442,7 @@ export class LocalProcessExtensionHost implements IExtensionHost {
 		return port || 0;
 	}
 
-	private _tryExtHostHandshake(timer: LocalProcessExtensionHostStartupTimer): Promise<PersistentProtocol> {
+	private _tryExtHostHandshake(opts: IExtensionHostProcessOptions, timer: LocalProcessExtensionHostStartupTimer): Promise<PersistentProtocol> {
 
 		return new Promise<PersistentProtocol>((resolve, reject) => {
 
@@ -480,6 +470,18 @@ export class LocalProcessExtensionHost implements IExtensionHost {
 				// and the first time a `then` executes some messages might be lost
 				// unless we immediately register a listener for `onMessage`.
 				resolve(new PersistentProtocol(new NodeSocket(this._extensionHostConnection)));
+			});
+
+			// Now that the named pipe listener is installed, start the ext host process
+			const sw = new StopWatch(false);
+			this._extensionHostProcess!.start(opts).then(() => {
+				sw.stop();
+				timer.markDidStartExtensionHost();
+
+				this._logService.info(`[LocalProcessExtensionHost]: IExtensionHostStarter.start() took ${sw.elapsed()} ms.`);
+			}, (err) => {
+				// Starting the ext host process resulted in an error
+				reject(err);
 			});
 
 		}).then((protocol) => {
@@ -749,15 +751,15 @@ async function spyPromise<T>(p: Promise<T>, whenDone: () => void): Promise<T> {
 }
 
 type LocalProcessExtensionHostStartupTimesClassification = {
-	didCreateExtensionHost: { classification: 'SystemMetaData', purpose: 'PerformanceAndHealth' };
-	didListenOnPipe: { classification: 'SystemMetaData', purpose: 'PerformanceAndHealth' };
-	didFindDebugPort: { classification: 'SystemMetaData', purpose: 'PerformanceAndHealth' };
-	didGetShellEnv: { classification: 'SystemMetaData', purpose: 'PerformanceAndHealth' };
-	didStartExtensionHost: { classification: 'SystemMetaData', purpose: 'PerformanceAndHealth' };
-	didReceiveConnection: { classification: 'SystemMetaData', purpose: 'PerformanceAndHealth' };
-	didReceiveReady: { classification: 'SystemMetaData', purpose: 'PerformanceAndHealth' };
-	didReceiveInitialized: { classification: 'SystemMetaData', purpose: 'PerformanceAndHealth' };
-	didFinishHandhsake: { classification: 'SystemMetaData', purpose: 'PerformanceAndHealth' };
+	didCreateExtensionHost: { classification: 'SystemMetaData', purpose: 'PerformanceAndHealth', isMeasurement: true };
+	didListenOnPipe: { classification: 'SystemMetaData', purpose: 'PerformanceAndHealth', isMeasurement: true };
+	didFindDebugPort: { classification: 'SystemMetaData', purpose: 'PerformanceAndHealth', isMeasurement: true };
+	didGetShellEnv: { classification: 'SystemMetaData', purpose: 'PerformanceAndHealth', isMeasurement: true };
+	didStartExtensionHost: { classification: 'SystemMetaData', purpose: 'PerformanceAndHealth', isMeasurement: true };
+	didReceiveConnection: { classification: 'SystemMetaData', purpose: 'PerformanceAndHealth', isMeasurement: true };
+	didReceiveReady: { classification: 'SystemMetaData', purpose: 'PerformanceAndHealth', isMeasurement: true };
+	didReceiveInitialized: { classification: 'SystemMetaData', purpose: 'PerformanceAndHealth', isMeasurement: true };
+	didFinishHandhsake: { classification: 'SystemMetaData', purpose: 'PerformanceAndHealth', isMeasurement: true };
 };
 type LocalProcessExtensionHostStartupTimesEvent = {
 	didCreateExtensionHost: number;
