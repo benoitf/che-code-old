@@ -68,3 +68,8 @@ For a main branch:
 $ git diff upstream-code/main main:code
 ```
 
+
+#### get the sha1 of the current subtree
+```bash
+$ git log -1 --grep="^git-subtree-dir: code/*\$" --no-show-signature | grep "git-subtree-split:" | tail -n 1 | cut -d ':' -f 2 | tr -d ' '
+```

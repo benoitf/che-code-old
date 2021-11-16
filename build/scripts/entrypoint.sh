@@ -13,18 +13,16 @@
 export USER_ID=$(id -u)
 export GROUP_ID=$(id -g)
 
-echo "user is ${USER_ID} and group ${GROUP_ID}"
-
 if ! grep -Fq "${USER_ID}" /etc/passwd; then
     # current user is an arbitrary
     # user (its uid is not in the
     # container /etc/passwd). Let's fix that
-    cat ${HOME}/passwd.template | \
+    cat ${HOME}/.passwd.template | \
     sed "s/\${USER_ID}/${USER_ID}/g" | \
     sed "s/\${GROUP_ID}/${GROUP_ID}/g" | \
     sed "s/\${HOME}/\/che-vscode/g" > /etc/passwd
 
-    cat ${HOME}/group.template | \
+    cat ${HOME}/.group.template | \
     sed "s/\${USER_ID}/${USER_ID}/g" | \
     sed "s/\${GROUP_ID}/${GROUP_ID}/g" | \
     sed "s/\${HOME}/\/che-vscode/g" > /etc/group
